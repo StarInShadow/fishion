@@ -1,54 +1,80 @@
-
-// 示例关卡（提前声明）
-const SIZE = 5;
-const EMPTY = 0, CROSS = 1, XMON = 2;
-
-// 示例关卡
-const levels = [
-    {
-        maxSteps: 5,
-        board: [
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, CROSS, EMPTY, XMON, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-        ],
-        hp: [
-            [0, 0, 0, 0, 0],
-            [0, 2, 0, 2, 0],
-            [0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0],
-        ]
-    },
-    {
-        maxSteps: 5,
-        board: [
-            [EMPTY, EMPTY, CROSS, EMPTY, EMPTY],
-            [EMPTY, XMON, EMPTY, CROSS, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-        ],
-        hp: [
-            [0, 0, 2, 0, 0],
-            [0, 2, 0, 2, 0],
-            [0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0],
-        ]
-    }
-];
-
 let board = [];
 let monsterHp = [];
+let size = 5;
 let clickCount = 0;
 let maxSteps = 0;
 let laserEffectCells = [];
 let history = [];
 let curLevel = 0;
 let mode = 'level'; // level, random, daily
+let isProcessing = false;
+let soundEnabled = false; // 音效开关，默认关
+
+// 音效工具
+function playSound(type, chain = 0) {
+    if (!soundEnabled) return;
+    const ctx = window.AudioContext ? new window.AudioContext() : new window.webkitAudioContext();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g);
+    g.connect(ctx.destination);
+    let freq = 440;
+    let duration = 0.15;
+    if (type === 'click') {
+        freq = 320;
+        duration = 0.08;
+    } else if (type === 'kill') {
+        freqlist=[261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]
+        freq = freqlist[Math.min(chain, freqlist.length - 1)];
+        duration = 0.12;
+    } else if (type === 'win') {
+        freq = 880;
+        duration = 0.5;
+    }
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.value = 0.2;
+    o.start();
+    o.stop(ctx.currentTime + duration);
+    o.onended = () => ctx.close();
+}
+
+// 示例关卡（提前声明）
+const EMPTY = 0, CROSS = 1, XMON = 2;
+
+// 示例关卡
+// 新关卡序列化格式：{size, maxSteps, board: ['0','C1','X3'...]}
+const levels = [
+    {
+        size: 3,
+        maxSteps: 3,
+        board: [
+            '0','0','0',
+            'C2','0','X2',
+            '0','0','0'
+        ]
+    },
+    {
+        size: 3,
+        maxSteps: 3,
+        board: [
+            '0','X2','0',
+            'C2','0','X2',
+            '0','0','0'
+        ]
+    },
+    {
+        size: 5,
+        maxSteps: 8,
+        board: [
+            'X2','X4','C2','C1','X3',
+            'X3','C1','X2','X4','C1',
+            '0','X2','0','X2','0',
+            'C2','C3','X4','X3','X1',
+            'X3','C3','0','C3','C1'
+        ]
+    }
+];
 
 function randomMonster(seed) {
     // 20%概率空格，40%十字怪，40%X怪
@@ -78,40 +104,55 @@ function initGame(level = 0, challengeMode = 'level') {
     history = [];
     if (mode === 'level') {
         if (!levels[curLevel]) {
-            // 关卡不存在，弹出提示框
             alert(
                 "关卡不存在！\n" +
                 "当前关卡索引: " + curLevel + "\n" +
                 "关卡总数: " + levels.length
             );
         } else {
-            board = JSON.parse(JSON.stringify(levels[curLevel].board));
-            monsterHp = JSON.parse(JSON.stringify(levels[curLevel].hp));
+            size = levels[curLevel].size;
             maxSteps = levels[curLevel].maxSteps;
+            // 反序列化关卡
+            board = Array.from({ length: size }, (_, i) => Array(size).fill(EMPTY));
+            monsterHp = Array.from({ length: size }, (_, i) => Array(size).fill(0));
+            for (let idx = 0; idx < levels[curLevel].board.length; idx++) {
+                const str = levels[curLevel].board[idx];
+                const i = Math.floor(idx / size), j = idx % size;
+                if (str === '0') {
+                    board[i][j] = EMPTY;
+                    monsterHp[i][j] = 0;
+                } else if (str.startsWith('C')) {
+                    board[i][j] = CROSS;
+                    monsterHp[i][j] = parseInt(str.slice(1));
+                } else if (str.startsWith('X')) {
+                    board[i][j] = XMON;
+                    monsterHp[i][j] = parseInt(str.slice(1));
+                }
+            }
         }
     } else if (mode === 'random') {
-        // 随机挑战
-        board = Array.from({ length: SIZE }, () => Array(SIZE).fill(EMPTY));
-        monsterHp = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+        size = 5;
+        board = Array.from({ length: size }, () => Array(size).fill(EMPTY));
+        monsterHp = Array.from({ length: size }, () => Array(size).fill(0));
         let seed = Date.now();
-        for (let i = 0; i < SIZE; i++) {
-            for (let j = 0; j < SIZE; j++) {
-                const type = randomMonster(seed + i * SIZE + j);
+        for (let i = 0; i < size; i++) {
+            for (let j = 0; j < size; j++) {
+                const type = randomMonster(seed + i * size + j);
                 board[i][j] = type;
-                monsterHp[i][j] = type === EMPTY ? 0 : randomHp(seed + i * SIZE + j + 100);
+                monsterHp[i][j] = type === EMPTY ? 0 : randomHp(seed + i * size + j + 100);
             }
         }
         maxSteps = 20;
     } else if (mode === 'daily') {
-        // 每日挑战，种子为日期
-        board = Array.from({ length: SIZE }, () => Array(SIZE).fill(EMPTY));
-        monsterHp = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
-        let dateSeed = parseInt(new Date().toISOString().slice(0, 10).replace(/-/g, ''));
-        for (let i = 0; i < SIZE; i++) {
-            for (let j = 0; j < SIZE; j++) {
-                const type = randomMonster(dateSeed + i * SIZE + j);
+        size = 5;
+        board = Array.from({ length: size }, () => Array(size).fill(EMPTY));
+        monsterHp = Array.from({ length: size }, () => Array(size).fill(0));
+        let dateSeed = parseInt(new Date().toISOString().slice(0, 10).replace(/-/g, ''))-1;
+        for (let i = 0; i < size; i++) {
+            for (let j = 0; j < size; j++) {
+                const type = randomMonster(dateSeed + i * size + j);
                 board[i][j] = type;
-                monsterHp[i][j] = type === EMPTY ? 0 : randomHp(dateSeed + i * SIZE + j + 100);
+                monsterHp[i][j] = type === EMPTY ? 0 : randomHp(dateSeed + i * size + j + 100);
             }
         }
         maxSteps = 20;
@@ -122,8 +163,11 @@ function initGame(level = 0, challengeMode = 'level') {
 function renderBoard() {
     const area = document.getElementById('game-area');
     area.innerHTML = '';
-    for (let i = 0; i < SIZE; i++) {
-        for (let j = 0; j < SIZE; j++) {
+    // 动态设置棋盘网格
+    area.style.gridTemplateColumns = `repeat(${size}, 50px)`;
+    area.style.gridTemplateRows = `repeat(${size}, 50px)`;
+    for (let i = 0; i < size; i++) {
+        for (let j = 0; j < size; j++) {
             const cell = document.createElement('div');
             let cls = 'cell';
             if (board[i][j] === EMPTY) cls += ' empty';
@@ -143,18 +187,22 @@ function renderBoard() {
     }
     drawLasers();
     renderControls();
-    updateInfo();
+    //updateInfo();
 }
 function handleClick(i, j) {
+    if (isProcessing) return;
     if (board[i][j] === EMPTY) return;
     if (maxSteps > 0 && clickCount >= maxSteps) return;
     saveHistory();
     clickCount++;
     monsterHp[i][j]--;
     if (monsterHp[i][j] <= 0) {
+        isProcessing = true;
         processDeath([[i, j]]);
     } else {
+        playSound('click');
         renderBoard();
+        updateInfo();
     }
 }
 function saveHistory() {
@@ -186,6 +234,7 @@ function processDeath(deadList) {
     // deadList: [[i,j], ...] 当前批次死亡怪物
     let laserTargets = [];
     let laserBeams = [];
+    let chainLevel = arguments[1] || 0;
     // 记录本批次死亡怪物
     let deadSet = new Set(deadList.map(([x, y]) => x + ',' + y));
     // 1. 发射激光
@@ -196,7 +245,7 @@ function processDeath(deadList) {
                 let color = '#2196f3'; // 蓝色
                 let start = [i, j];
                 let end = null;
-                while (ni >= 0 && ni < SIZE && nj >= 0 && nj < SIZE) {
+                while (ni >= 0 && ni < size && nj >= 0 && nj < size) {
                     if (board[ni][nj] !== EMPTY && !deadSet.has(ni + ',' + nj)) {
                         laserTargets.push([ni, nj]);
                         end = [ni, nj];
@@ -207,8 +256,8 @@ function processDeath(deadList) {
                 if (!end) {
                     // 到边界
                     end = [
-                        di === 0 ? i : (di > 0 ? SIZE - 1 : 0),
-                        dj === 0 ? j : (dj > 0 ? SIZE - 1 : 0)
+                        di === 0 ? i : (di > 0 ? size - 1 : 0),
+                        dj === 0 ? j : (dj > 0 ? size - 1 : 0)
                     ];
                 }
                 laserBeams.push({ start, end, color });
@@ -219,7 +268,7 @@ function processDeath(deadList) {
                 let color = '#e53935'; // 红色
                 let start = [i, j];
                 let end = null;
-                while (ni >= 0 && ni < SIZE && nj >= 0 && nj < SIZE) {
+                while (ni >= 0 && ni < size && nj >= 0 && nj < size) {
                     if (board[ni][nj] !== EMPTY && !deadSet.has(ni + ',' + nj)) {
                         laserTargets.push([ni, nj]);
                         end = [ni, nj];
@@ -235,6 +284,8 @@ function processDeath(deadList) {
             });
         }
     });
+    // 播放击杀音效，音调随 chainLevel 递增
+    if (deadList.length > 0) playSound('kill', chainLevel);
     // 激光特效高亮
     laserEffectCells = laserTargets.slice();
     renderBoard();
@@ -258,7 +309,10 @@ function processDeath(deadList) {
         drawLasers([]); // 清除激光
         // 4. 连锁递归
         if (nextDead.length > 0) {
-            setTimeout(() => processDeath(nextDead), 400);
+            setTimeout(() => processDeath(nextDead, chainLevel + 1), 400);
+        } else {
+            isProcessing = false;
+            updateInfo();
         }
     }, 350);
 }
@@ -303,6 +357,7 @@ function updateInfo() {
     }
     if (allCleared) {
         status = '🎉 恭喜通关！';
+        playSound('win');
     } else if (maxSteps > 0 && clickCount >= maxSteps) {
         status = '❌ 步数已用尽，挑战失败';
     }
@@ -328,8 +383,15 @@ function renderControls() {
     }
     html += `<button onclick="initGame(0, 'level')">关卡模式</button> `;
     html += `<button onclick="initGame(0, 'random')">随机挑战</button> `;
-    html += `<button onclick="initGame(0, 'daily')">每日挑战</button>`;
+    html += `<button onclick="initGame(0, 'daily')">每日挑战</button> `;
+    html += `<button onclick="toggleSound()">音效${soundEnabled ? '开' : '关'}</button>`;
     ctrl.innerHTML = html;
+
+}
+
+function toggleSound() {
+    soundEnabled = !soundEnabled;
+    renderControls();
 }
 
 function nextLevel() {
