@@ -47,31 +47,70 @@ const EMPTY = 0, CROSS = 1, XMON = 2;
 const levels = [
     {
         size: 3,
-        maxSteps: 3,
+        maxSteps: 2,
         board: [
             '0','0','0',
-            'C2','0','X2',
+            'C2','0','C1',
             '0','0','0'
         ]
     },
     {
         size: 3,
-        maxSteps: 3,
+        maxSteps: 1,
         board: [
-            '0','X2','0',
-            'C2','0','X2',
+            '0','0','0',
+            'C2','C1','C1',
             '0','0','0'
         ]
     },
     {
+        size: 3,
+        maxSteps: 1,
+        board: [
+            'C1','C1','C4',
+            'C1','C1','C1',
+            'C4','C1','C1'
+        ]
+    },
+    {
+        size: 4,
+        maxSteps: 1,
+        board: [
+            'C1','C1','0', 'C2',
+            '0', 'C1','0', 'C2',
+            '0', '0', '0', 'C2',
+            'C2','C2','C2','C1'
+        ]
+    },
+    {
+        size: 4,
+        maxSteps: 4,
+        board: [
+            'C1','C2','0', 'C2',
+            '0', 'C2','C1','C2',
+            '0', 'C4','C2','C3',
+            'C3','C1','C2','C3'
+        ]
+    },
+    {
+        size: 4,
+        maxSteps: 3,
+        board: [
+            'X1','C2','0', 'X1',
+            '0', 'X2','0', '0',
+            '0', '0', '0', '0',
+            'C2','0', '0', '0'
+        ]
+    },
+    {
         size: 5,
-        maxSteps: 8,
+        maxSteps: 7,
         board: [
             'X2','X4','C2','C1','X3',
             'X3','C1','X2','X4','C1',
-            '0','X2','0','X2','0',
+            '0', 'X2','0', 'X2','0',
             'C2','C3','X4','X3','X1',
-            'X3','C3','0','C3','C1'
+            'X3','C3','0', 'C3','C1'
         ]
     }
 ];
@@ -147,7 +186,7 @@ function initGame(level = 0, challengeMode = 'level') {
         size = 5;
         board = Array.from({ length: size }, () => Array(size).fill(EMPTY));
         monsterHp = Array.from({ length: size }, () => Array(size).fill(0));
-        let dateSeed = parseInt(new Date().toISOString().slice(0, 10).replace(/-/g, ''))-1;
+        let dateSeed = parseInt(new Date().toISOString().slice(0, 10).replace(/-/g, ''));
         for (let i = 0; i < size; i++) {
             for (let j = 0; j < size; j++) {
                 const type = randomMonster(dateSeed + i * size + j);
@@ -178,8 +217,8 @@ function renderBoard() {
                 cls += ' laser';
             }
             cell.className = cls;
-            if (board[i][j] === CROSS) cell.innerText = '+' + monsterHp[i][j];
-            else if (board[i][j] === XMON) cell.innerText = 'X' + monsterHp[i][j];
+            if (board[i][j] === CROSS) cell.innerText = monsterHp[i][j];
+            else if (board[i][j] === XMON) cell.innerText = monsterHp[i][j];
             else cell.innerText = '';
             cell.onclick = () => handleClick(i, j);
             area.appendChild(cell);
@@ -232,13 +271,15 @@ function restartLevel() {
 }
 function processDeath(deadList) {
     // deadList: [[i,j], ...] 当前批次死亡怪物
+    // 去重处理
+    const uniqueDeadList = Array.from(new Set(deadList.map(([x, y]) => x + ',' + y))).map(str => str.split(',').map(Number));
     let laserTargets = [];
     let laserBeams = [];
     let chainLevel = arguments[1] || 0;
     // 记录本批次死亡怪物
-    let deadSet = new Set(deadList.map(([x, y]) => x + ',' + y));
+    let deadSet = new Set(uniqueDeadList.map(([x, y]) => x + ',' + y));
     // 1. 发射激光
-    deadList.forEach(([i, j]) => {
+    uniqueDeadList.forEach(([i, j]) => {
         if (board[i][j] === CROSS) {
             [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([di, dj], idx) => {
                 let ni = i + di, nj = j + dj;
@@ -285,7 +326,7 @@ function processDeath(deadList) {
         }
     });
     // 播放击杀音效，音调随 chainLevel 递增
-    if (deadList.length > 0) playSound('kill', chainLevel);
+    if (uniqueDeadList.length > 0) playSound('kill', chainLevel);
     // 激光特效高亮
     laserEffectCells = laserTargets.slice();
     renderBoard();
@@ -300,7 +341,7 @@ function processDeath(deadList) {
             }
         });
         // 3. 清理死亡怪物
-        deadList.forEach(([i, j]) => {
+        uniqueDeadList.forEach(([i, j]) => {
             board[i][j] = EMPTY;
             monsterHp[i][j] = 0;
         });
@@ -384,9 +425,90 @@ function renderControls() {
     html += `<button onclick="initGame(0, 'level')">关卡模式</button> `;
     html += `<button onclick="initGame(0, 'random')">随机挑战</button> `;
     html += `<button onclick="initGame(0, 'daily')">每日挑战</button> `;
-    html += `<button onclick="toggleSound()">音效${soundEnabled ? '开' : '关'}</button>`;
+    html += `<button onclick="toggleSound()">音效${soundEnabled ? '开' : '关'}</button> `;
+    html += `<button onclick="exportLevel()">导出关卡</button> `;
+    html += `<button onclick="importLevel()">加载关卡</button>`;
     ctrl.innerHTML = html;
+}
+// 导出当前关卡为文本
+function exportLevel() {
+    // 当前关卡对象
+    const levelObj = {
+        size,
+        maxSteps,
+        board: [].concat(...board.map((row, i) => row.map((v, j) => {
+            if (v === EMPTY) return '0';
+            if (v === CROSS) return 'C' + monsterHp[i][j];
+            if (v === XMON) return 'X' + monsterHp[i][j];
+        })))
+    };
+    const text = JSON.stringify(levelObj, null, 2);
+    showTextDialog('关卡导出', text);
+}
 
+// 加载关卡
+function importLevel() {
+    showTextDialog('粘贴关卡数据', '', function(input) {
+        try {
+            const obj = JSON.parse(input);
+            if (!obj.size || !obj.maxSteps || !Array.isArray(obj.board)) throw new Error('格式错误');
+            // 加载到临时关卡
+            levels.push(obj);
+            initGame(levels.length - 1, 'level');
+        } catch(e) {
+            alert('解析失败: ' + e.message);
+        }
+    });
+}
+
+// 通用弹窗文本框
+function showTextDialog(title, text, onConfirm) {
+    const dlg = document.createElement('div');
+    dlg.style.position = 'fixed';
+    dlg.style.left = '0';
+    dlg.style.top = '0';
+    dlg.style.width = '100vw';
+    dlg.style.height = '100vh';
+    dlg.style.background = 'rgba(0,0,0,0.3)';
+    dlg.style.zIndex = '9999';
+    dlg.style.display = 'flex';
+    dlg.style.alignItems = 'center';
+    dlg.style.justifyContent = 'center';
+    const box = document.createElement('div');
+    box.style.background = '#fff';
+    box.style.padding = '20px';
+    box.style.borderRadius = '8px';
+    box.style.boxShadow = '0 2px 12px #888';
+    box.style.minWidth = '320px';
+    box.innerHTML = `<div style="font-size:18px;margin-bottom:10px;">${title}</div>`;
+    const ta = document.createElement('textarea');
+    ta.style.width = '100%';
+    ta.style.height = '120px';
+    ta.value = text;
+    box.appendChild(ta);
+    box.appendChild(document.createElement('br'));
+    const btns = document.createElement('div');
+    btns.style.textAlign = 'right';
+    btns.style.marginTop = '10px';
+    const btnOk = document.createElement('button');
+    btnOk.innerText = onConfirm ? '确定' : '关闭';
+    btnOk.onclick = function() {
+        if (onConfirm) onConfirm(ta.value);
+        document.body.removeChild(dlg);
+    };
+    btns.appendChild(btnOk);
+    const btnCancel = document.createElement('button');
+    btnCancel.innerText = '取消';
+    btnCancel.style.marginLeft = '10px';
+    btnCancel.onclick = function() {
+        document.body.removeChild(dlg);
+    };
+    btns.appendChild(btnCancel);
+    box.appendChild(btns);
+    dlg.appendChild(box);
+    document.body.appendChild(dlg);
+    ta.focus();
+    ta.select();
 }
 
 function toggleSound() {
